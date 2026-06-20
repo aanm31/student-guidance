@@ -54,27 +54,58 @@ function selectAnswer(index,button){
 
 nextButton.addEventListener('click',()=>{ if(currentQuestion < quiz.length-1){currentQuestion++;renderQuestion()}else finishQuiz() });
 
-function finishQuiz(){
-  const percent = Math.round(score/quiz.length*100); const records = JSON.parse(localStorage.getItem('student-guidance-results')||'[]');
-  records.unshift({score:percent,date:new Date().toLocaleDateString('ar-SA')}); localStorage.setItem('student-guidance-results',JSON.stringify(records.slice(0,5)));
+async function saveResult(percent){
+  const response = await fetch('/api/results', {
+    method: 'POST',
+    headers: {'content-type':'application/json'},
+    body: JSON.stringify({correctAnswers:score,totalQuestions:quiz.length,scorePercent:percent})
+  });
+  if(!response.ok) throw new Error('تعذر حفظ النتيجة');
+  return response.json();
+}
+
+async function finishQuiz(){
+  const percent = Math.round(score/quiz.length*100);
   questionText.textContent = score===3?'ممتاز! أنت طالب واعٍ 🌟':score===2?'أداء جميل، واصل نموك':'كل محاولة تمنحك معرفة جديدة';
   answersBox.innerHTML=`<div style="text-align:center;padding:16px"><strong style="font-size:58px;color:#ee765f">${arabicNumber(percent)}٪</strong><p>أجبت عن ${arabicNumber(score)} من ${arabicNumber(quiz.length)} إجابات صحيحة.</p></div>`;
-  feedback.textContent='تم حفظ النتيجة في سجل الإنجاز على هذا الجهاز.'; feedback.style.color='#347d5c';
+  feedback.textContent='جارٍ حفظ النتيجة في سجل الإنجاز...'; feedback.style.color='#347d5c';
   nextButton.textContent='إعادة المسابقة'; nextButton.disabled=false;
   nextButton.onclick=()=>{currentQuestion=0;score=0;nextButton.onclick=null;renderQuestion()};
-  renderResults(); showToast('أضيفت نتيجتك إلى لوحة الإنجاز');
+  try {
+    await saveResult(percent);
+    feedback.textContent='تم حفظ النتيجة في سجل الإنجاز المشترك.';
+    showToast('أضيفت نتيجتك إلى قاعدة بيانات التوجيه والإرشاد');
+  } catch(error) {
+    const records = JSON.parse(localStorage.getItem('student-guidance-results')||'[]');
+    records.unshift({score:percent,date:new Date().toLocaleDateString('ar-SA')});
+    localStorage.setItem('student-guidance-results',JSON.stringify(records.slice(0,5)));
+    feedback.textContent='تعذر الاتصال الآن؛ حُفظت النتيجة مؤقتًا على هذا الجهاز.';
+    feedback.style.color='#b94e3d';
+    showToast('حُفظت النتيجة مؤقتًا على الجهاز');
+  }
+  await renderResults();
 }
 
-function renderResults(){
-  const records=JSON.parse(localStorage.getItem('student-guidance-results')||'[]'); const list=document.querySelector('#results-list');
-  if(!records.length){list.innerHTML='<p class="empty-state">أكمل المسابقة لتظهر نتيجتك هنا.</p>';return}
-  list.innerHTML=records.map((r,i)=>`<div class="result-row"><span>محاولة ${arabicNumber(records.length-i)} · ${r.date}</span><b>${arabicNumber(r.score)}٪</b></div>`).join('');
-  const avg=Math.round(records.reduce((a,r)=>a+r.score,0)/records.length); document.querySelector('#average-score').textContent=`${arabicNumber(avg)}٪`;
-  document.querySelector('#score-donut').style.background=`conic-gradient(var(--coral) ${avg}%,#edf0ec 0)`;
-  document.querySelector('#total-participations').textContent=arabicNumber(340+records.length); document.querySelector('#participant-count').textContent=arabicNumber(128+records.length);
+async function renderResults(){
+  const list=document.querySelector('#results-list');
+  try {
+    const response=await fetch('/api/results');
+    if(!response.ok) throw new Error('تعذر تحميل النتائج');
+    const data=await response.json(); const records=data.results;
+    if(!records.length){list.innerHTML='<p class="empty-state">أكمل المسابقة لتظهر أول نتيجة هنا.</p>'}
+    else list.innerHTML=records.map((r)=>`<div class="result-row"><span>محاولة · ${new Date(r.completedAt).toLocaleDateString('ar-SA')}</span><b>${arabicNumber(r.score)}٪</b></div>`).join('');
+    document.querySelector('#average-score').textContent=`${arabicNumber(data.summary.averageScore)}٪`;
+    document.querySelector('#score-donut').style.background=`conic-gradient(var(--coral) ${data.summary.averageScore}%,#edf0ec 0)`;
+    document.querySelector('#total-participations').textContent=arabicNumber(data.summary.totalAttempts);
+    document.querySelector('#participant-count').textContent=arabicNumber(data.summary.totalAttempts);
+  } catch(error) {
+    const records=JSON.parse(localStorage.getItem('student-guidance-results')||'[]');
+    if(!records.length){list.innerHTML='<p class="empty-state">تعذر تحميل السجل المشترك الآن.</p>';return}
+    list.innerHTML=records.map((r)=>`<div class="result-row"><span>نتيجة مؤقتة · ${r.date}</span><b>${arabicNumber(r.score)}٪</b></div>`).join('');
+  }
 }
 
-document.querySelector('#clear-results').addEventListener('click',()=>{localStorage.removeItem('student-guidance-results');renderResults();showToast('تم مسح سجل النتائج')});
+document.querySelector('#refresh-results').addEventListener('click',()=>{renderResults();showToast('تم تحديث سجل النتائج')});
 
 const modal=document.querySelector('#initiative-modal');
 document.querySelectorAll('[data-modal]').forEach(btn=>btn.addEventListener('click',()=>{

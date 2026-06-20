@@ -1,0 +1,4 @@
+.cache/
+.pnpm-home/
+node_modules/
+.wrangler/
